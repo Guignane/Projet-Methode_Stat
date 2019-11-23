@@ -14,7 +14,6 @@ knitr::opts_chunk$set(echo = FALSE)
 knitr::opts_chunk$set(message = FALSE)
 knitr::opts_chunk$set(fig.align = "center")
 ```
-# Just checking pushing and pulling in Git
 
 # Loading the data
 The file **Market.rda** contains the list **Market**.
@@ -56,10 +55,10 @@ invisible(lapply(lib_vec, f_install_load_lib)) # no output from lapply
 load("Market.rda")
 
 # Volatility surface
-option_obs = Market[[5]]
-strike_mkt = Market[[5]][ , 1]
-tau_mkt =  Market[[5]][ , 2]
-IV_mkt =  Market[[5]][ , 3]
+option_obs = Market$puts
+strike_mkt = Market$puts[ , 1]
+tau_mkt =  Market$puts[ , 2]
+IV_mkt =  Market$puts[ , 3]
 vol_surf = interp(strike_mkt, tau_mkt, IV_mkt, xo = seq( min(strike_mkt),  
            max(strike_mkt), length.out = 250) , yo = seq( min(tau_mkt), 
            max(tau_mkt), length.out = 250) )
@@ -72,42 +71,147 @@ lit = FALSE, add = TRUE)
 rglwidget()
 ```
 
-# Pricing of a portfolio of options
 ```{r}
-BS_price = function(S, K,  TT, vol, r, isCall){
+
+f_BS_price = function(S, K,  TT, vol, r, isCall){
+  # Function to price options using Black Scholes formula
+  
+  # input: 
+  #      double S: Underlying price
+  #      double K: Strike price
+  #      double TT: Time to maturity
+  #      double vol: Volatility
+  #      double r:  risk-free rate to maturity
+  #      boolean isCall: True for Call, False for Put
+  
+  # output:
+  #      double C or P: The price of the option
   d1 = ( log(S/K) + (r + (vol ** 2)/2 ) * TT )/( vol * sqrt(TT))
   d2 = ( log(S/K) + (r - (vol ** 2)/2 ) * TT )/( vol * sqrt(TT))
   C = S  * pnorm(d1) - exp(-r * TT) * K * pnorm(d2)
   if(isCall){
     return(C)
   } else{
-    return( exp(-r * TT) * K + C - S) # Put call parity
+    P = exp(-r * TT) * K + C - S
+    return(P) # Put call parity
   }
 }
-S0 = as.numeric( tail(Market[[1]], n = 1) )
-VIX = as.numeric( tail(Market[[2]], n = 1) )
+
+f_rf_interpolate = function(t1, rf){
+  # Function to find rate at a given time by interpolation given term structure
+  
+  # input: 
+  #      double t1: time at which we want to determine the rate, t1 should be
+  #                 inside the term structure maturity intervals
+  #      double rf: Named vector of risk-free rate, with the names being the 
+  #                 maturities of the term structure.
+  
+  # output:
+  #       double r: risk-free rate at t1
+  
+  rf_mat = as.numeric(names(rf)) # risk free term structure maturities 
+  rate_vec = as.numeric(rf)
+  low_idx = findInterval(t1, rf_mat)
+  r = (t1 - rf_mat[low_idx])/(rf_mat[low_idx + 1] - rf_mat[low_idx]) *
+    (rate_vec[low_idx + 1] - rate_vec[low_idx]) + rate_vec[low_idx]
+  
+  return(r)
+}
+
+
+f_fwd_rate = function(t1, t2, rf){
+  # Function to find forward rate between two dates t1 and t2 given the 
+  # term structure rf. The function uses f_rf_interpolate
+  
+  #input:
+  #      double t1: start date of the forward rate
+  #      double t2: end date of the forward rate
+  
+  #output:
+  #      double fwd: Forward rate between t1 and t2
+  
+  r1 = f_rf_interpolate(t1, rf)
+  r2 = f_rf_interpolate(t2, rf)
+  fwd = (t2*r2 - t1*r1)/(t2 - t1)
+  
+  return(fwd)
+}
+
+f_hist = function(data, threshold, xlab, title ){
+  # Function to draw the histogram of data and the value of the threshold
+  
+  #input
+  #  double data: A vector for which we want the histogram
+  #  double threshold: A given threshold to be put on the graph (e.g VaR)
+  #  string xlab : Label of the x-axis
+  #  string title: Title of the plot
+  
+  #output:
+  #  Plotted graph
+  
+  hist(data, breaks = 10 * round( log( length( data ) ) ) , xlab = xlab, 
+       main = title)
+  abline(v = threshold, col = "red", lwd = 2)
+  
+  
+}
+
+
+# Initializing recurrent variables
+
+S0 = as.numeric( tail(Market$sp500, n = 1) ) # Current index value
+VIX = as.numeric( tail(Market$vix, n = 1) ) # Current vix value
+
 # Preparing the vectors
 S_vec = rep(S0, 4)
 K_vec = c(1600, 1650, 1750, 1800)
-TT_vec = c(20, 20, 40, 40)/250.0
+TT_vec_now = c(20, 20, 40, 40)/250.0
+TT_vec_5d = c(15, 15, 35, 35)/250.0
 vol_vec = rep(VIX, 4)
-# interpolate rates (20 days and 40 days)
-rates = Market[[3]]
-# Use 7 days and 30 days to interpolate rates for 20 days
-r20 = as.numeric(rates[2]) + ( 20 - 7)/(30 - 7) *
-                 (as.numeric(rates[3]) - as.numeric(rates[2]) ) 
-# Use 30 days and 90 days to interpolate rates for 40 days
-r40 = as.numeric(rates[3]) + ( 40 - 30)/(90 - 30) *
-                 (as.numeric(rates[4]) - as.numeric(rates[3]) ) 
-r_vec = c(r20, r20, r40, r40)
 isCall_vec = rep(TRUE, 4)
-price_vec = mapply(BS_price, S_vec, K_vec, TT_vec, vol_vec, r_vec, isCall_vec)
 
+# rates at 20 and 40 days
+r20 = f_rf_interpolate(t1 = 20.0/250.0, rf = Market$rf)
+r40 = f_rf_interpolate(t1 = 40.0/250.0, rf = Market$rf)
+r_vec_now = c(r20, r20, r40, r40)
+
+# Forward rates between (5 and 20 days) and (5 and 40 days)
+fwd_5_20 = f_fwd_rate(t1 = 5./250., t2 = 20./250., rf = Market$rf)
+fwd_5_40 = f_fwd_rate(t1 = 5./250., t2 = 40./250., rf = Market$rf)
+r_vec_5d = c(fwd_5_20, fwd_5_20, fwd_5_40, fwd_5_40)
+
+# mean, variance of sp500 and vix log-returns
+n_sim = 10000L
+lib_vec = c("PerformanceAnalytics")
+invisible(lapply(lib_vec, f_install_load_lib)) 
+# log returns
+sp500_logrets = PerformanceAnalytics::Return.calculate(Market$sp500, 
+                                                       method = "log") 
+sp500_logrets = sp500_logrets[-1] # Get rid of the first line
+vix_logrets = PerformanceAnalytics::Return.calculate(Market$vix, 
+                                                       method = "log")
+vix_logrets = vix_logrets[-1]
+mu_sp500 = mean(sp500_logrets)
+mu_vix = mean(vix_logrets)
+# Finding mean and variance
+sigma2_sp500 = ( length( sp500_logrets ) - 1)/(length( sp500_logrets ) ) *
+                var(sp500_logrets)
+sigma2_vix = ( length( vix_logrets ) - 1)/( length( vix_logrets ) ) * 
+               var(vix_logrets)
+
+```
+# Pricing of a portfolio of options
+
+```{r}
+
+price_vec = mapply(f_BS_price, S_vec, K_vec, TT_vec_now, 
+                   vol_vec, r_vec_now, isCall_vec)
 V0 = sum(price_vec)
-options_df = data.frame("S0" = S_vec, "K" = K_vec, "tau" = TT_vec, 
-                        "sigma" = vol_vec, "r" = round(r_vec, 6), 
+options_df = data.frame("S0" = S_vec, "K" = K_vec, "tau" = TT_vec_now, 
+                        "sigma" = vol_vec, "r" = round(r_vec_now, 6), 
                         "C" = round(price_vec, 3))
 ```
+
 The prices of the call options using the Black-Scholes formula are given in 
 table \ref{tab: calls_prices)
 ```{r calls_prices, results = 'asis'}
@@ -126,48 +230,27 @@ parameters given by the mean and standard deviation from the historical values.
 
 ```{r PLdist_gauss1D, fig.cap = "\\label{fig:PLdist_gauss1D} P&L distribution for normal log returns of the SP500. The red line represents the value at risk at 95% probability.", fig.align = "center"}
 set.seed(2019)
-n_sim = 10000L
-lib_vec = c("PerformanceAnalytics")
-invisible(lapply(lib_vec, f_install_load_lib)) 
-SP500_logrets = PerformanceAnalytics::Return.calculate(Market[[1]], method = "log") # log returns
-SP500_logrets = SP500_logrets[-1] # Get rid of the first line
-mu_SP500 = mean(SP500_logrets)
-# Finding mean and variance
-sigma2 = (length(SP500_logrets) - 1)/(length(SP500_logrets)) * var(SP500_logrets)
+
 # Generate n_sim new stock prices scenario
-gauss_rets_SP500 = rowSums(matrix(rnorm(5 * n_sim, mean = mu_SP500, sd = sqrt(sigma2)), nrow = n_sim, ncol = 5))
-SP500_new = S0 * exp(gauss_rets_SP500)
+gauss_rets_sp500 = rowSums(matrix(rnorm(5 * n_sim, mean = mu_sp500,
+                   sd = sqrt(sigma2_sp500)), nrow = n_sim, ncol = 5))
+sp500_5d = S0 * exp(gauss_rets_sp500)
+
 # profit and loss distribution for 1 risk driver (1D)
-BV_new = rep(NA, n_sim) # new book value
+BV_5d = rep(NA, n_sim) # new book value
 
-K_vec = c(1600, 1650, 1750, 1800)
-vol_vec = rep(VIX, 4)
-isCall_vec = rep(TRUE, 4)
-TT_vec = c(15, 15, 35, 35)/250.0 # New maturities vector
-
-# Use 1 day and 7 days to interpolate rates for 5 days
-r5 = as.numeric(rates[1]) + ( 5 - 1)/(7 - 1) *
-                 (as.numeric(rates[2]) - as.numeric(rates[1]) ) 
-# Forward rates forward1 between (t1 = 5 days and t2 = 20 days) and
-# forward2 between (t1 = 5 days and t2 = 40 days) assuming continuous 
-# compounding r1,2 = (r2*t2 - r1*t1)/(t2 - t1)
-forward1 = (20*r20 - 5*r5)/(20 -5)
-forward2 = (40*r40 - 5*r5)/(40 -5)
-
-r_vec = c(forward1, forward1, forward2, forward2)
 for (i in 1:n_sim){
-  S_vec = rep(as.numeric(SP500_new[i]), 4)
-  price_vec = mapply(BS_price, S_vec, K_vec, TT_vec,
-                     vol_vec, r_vec, isCall_vec)
-  BV_new[i] = sum(price_vec)
+  S_vec = rep(as.numeric(sp500_5d[i]), 4)
+  price_vec = mapply(f_BS_price, S_vec, K_vec, TT_vec_5d,
+                     vol_vec, r_vec_5d, isCall_vec)
+  BV_5d[i] = sum(price_vec)
 }
-PL_gauss1D = BV_new - V0
+PL_gauss1D = BV_5d - V0
 VaR95_gauss1D = quantile(PL_gauss1D, 0.05)
-#ES95_gauss1D = ES( PL_gauss1D/1000, method = "historical", p = 0.95) * 1000
 ES95_gauss1D = mean(PL_gauss1D[PL_gauss1D <= VaR95_gauss1D])
 
-hist(PL_gauss1D, breaks = 10 * round(log(n_sim)))
-abline(v = VaR95_gauss1D, col = "red", lwd = 2)
+f_hist(data = PL_gauss1D, threshold = VaR95_gauss1D, xlab = "PL_gauss1D",
+       title = "P&L histogram, Gaussian log returns for SP500")
 ```
 
 We model `r n_sim` possible values for the stocks in 5 days and 
@@ -191,60 +274,34 @@ values.
 ```{r PLdist_gauss2D, fig.cap = "\\label{fig:PLdist_gauss2D} P&L distribution for normal log returns of the SP500 and the vix. The red line represents the value at risk at 95% probability."}
 
 set.seed(2019)
-n_sim = 10000L
-lib_vec = c("PerformanceAnalytics")
-invisible(lapply(lib_vec, f_install_load_lib)) 
-# log returns
-SP500_logrets = PerformanceAnalytics::Return.calculate(Market[[1]], 
-                                                       method = "log") 
-SP500_logrets = SP500_logrets[-1] # Get rid of the first line
-vix_logrets = PerformanceAnalytics::Return.calculate(Market[[2]], 
-                                                       method = "log")
-vix_logrets = vix_logrets[-1]
-mu_SP500 = mean(SP500_logrets)
-mu_vix = mean(vix_logrets)
-# Finding mean and variance
-sigma2 = ( length(SP500_logrets) - 1)/(length(SP500_logrets) ) * var(SP500_logrets)
-sigma2_vix = ( length(vix_logrets) - 1)/(length(vix_logrets) ) * var(vix_logrets)
+
 # Generate n_sim new stock prices scenario
-gauss_rets_SP500 = rowSums( matrix(rnorm( 5 * n_sim, mean = mu_SP500, sd = sqrt(sigma2) ),
+gauss_rets_sp500 = rowSums( matrix(rnorm( 5 * n_sim, mean = mu_sp500,
+                                          sd = sqrt(sigma2_sp500) ),
                             nrow = n_sim, ncol = 5) )
 gauss_rets_vix = rowSums( matrix(rnorm( 5 * n_sim, mean = mu_vix, 
                                         sd = sqrt(sigma2_vix) ), 
                                  nrow = n_sim, ncol = 5) )
-SP500_new = S0 * exp(gauss_rets_SP500)
+sp500_5d = S0 * exp(gauss_rets_sp500)
 vix_new = VIX * exp(gauss_rets_vix)
 
 # profit and loss distribution for 1 risk driver (1D)
-BV_new = rep(NA, n_sim) # new book value
+BV_5d = rep(NA, n_sim) # new book value
 
-K_vec = c(1600, 1650, 1750, 1800)
-isCall_vec = rep(TRUE, 4)
-TT_vec = c(15, 15, 35, 35)/250.0 # New maturities vector
-
-# Use 1 day and 7 days to interpolate rates for 5 days
-r5 = as.numeric(rates[1]) + ( 5 - 1)/(7 - 1) *
-                 (as.numeric(rates[2]) - as.numeric(rates[1]) ) 
-# Forward rates forward1 between (t1 = 5 days and t2 = 20 days) and
-# forward2 between (t1 = 5 days and t2 = 40 days) assuming continuous 
-# compounding r1,2 = (r2*t2 - r1*t1)/(t2 - t1)
-forward1 = (20*r20 - 5*r5)/(20 -5)
-forward2 = (40*r40 - 5*r5)/(40 -5)
-
-r_vec = c(forward1, forward1, forward2, forward2)
+r_vec = c(fwd_5_20, fwd_5_20, fwd_5_40, fwd_5_40)
 for (i in 1:n_sim){
-  S_vec = rep(SP500_new[i], 4)
+  S_vec = rep(sp500_5d[i], 4)
   vol_vec = rep(vix_new[i], 4)
-  price_vec = mapply(BS_price, S_vec, K_vec, TT_vec,
+  price_vec = mapply(f_BS_price, S_vec, K_vec, TT_vec_5d,
                      vol_vec, r_vec, isCall_vec)
-  BV_new[i] = sum(price_vec)
+  BV_5d[i] = sum(price_vec)
 }
-PL_gauss2D = BV_new - V0
+PL_gauss2D = BV_5d - V0
 VaR95_gauss2D = quantile(PL_gauss2D, 0.05)
 ES95_gauss2D = mean(PL_gauss2D[PL_gauss2D <= VaR95_gauss2D])
 
-hist(PL_gauss2D, breaks = 10 * round(log(n_sim)))
-abline(v = VaR95_gauss2D, col = "red", lwd = 2)
+f_hist(data = PL_gauss2D, threshold = VaR95_gauss2D, xlab = "PL_gauss2D",
+       title = "P&L histogram, Gaussian log returns for SP500 and vix")
 ```
 We model `r n_sim` possible values for the SP500 and the vix in 5 days and 
 use them to estimate the distribution for the P&L in a week (5 days).
@@ -276,78 +333,62 @@ set.seed(2019)
 n_sim = 10000L
 lib_vec = c("PerformanceAnalytics", "copula", "MASS", "fGarch")
 invisible(lapply(lib_vec, f_install_load_lib)) 
-# log returns
-SP500_logrets = PerformanceAnalytics::Return.calculate(Market[[1]], 
-                                                       method = "log") 
-SP500_logrets = as.numeric( SP500_logrets[-1] ) # Get rid of the first line
-vix_logrets = PerformanceAnalytics::Return.calculate(Market[[2]], 
-                                                       method = "log")
-vix_logrets = as.numeric( vix_logrets[-1] )
-df_SP500 = 10L
+
+df_sp500 = 10L
 df_vix = 5L
 
 # Fit student-t distributions
-fit_SP500 =  suppressWarnings( fitdistr(SP500_logrets, "t", df = df_SP500) )
+fit_sp500 =  suppressWarnings( fitdistr(sp500_logrets, "t", df = df_sp500) )
 fit_vix =  suppressWarnings( fitdistr(vix_logrets, "t", df = df_vix) )
 
 # Finding location and scale parameters of student-t distribution
-mu_SP500 = as.numeric(fit_SP500$estimate[1])
+mu_sp500 = as.numeric(fit_sp500$estimate[1])
 mu_vix = as.numeric(fit_vix$estimate[1])
 
-scale_SP500 = as.numeric(fit_SP500$estimate[2])
+scale_sp500 = as.numeric(fit_sp500$estimate[2])
 scale_vix = as.numeric(fit_vix$estimate[2])
 
 # Merging using a normal Copula
 
-U_SP500 = pstd(SP500_logrets, mean = mu_SP500, sd = scale_SP500, nu = df_SP500)
+U_sp500 = pstd(sp500_logrets, mean = mu_sp500, sd = scale_sp500, nu = df_sp500)
 U_vix = pstd(vix_logrets, mean = mu_vix, sd = scale_vix, nu = df_vix)
-U = cbind(U_SP500, U_vix)
+U = cbind(as.numeric(U_sp500), as.numeric(U_vix))
 
 C = normalCopula(dim = 2)
+
 fit = fitCopula(C, data = U, method = "ml")
 
 # Generating 5 days returns with the required relationship
 U_sim = rCopula(5 * n_sim, fit@copula)
-logrets_SP500 = rowSums( matrix(qstd(U_sim[, 1], mean = mu_SP500, 
-                                     sd = scale_SP500, nu = df_SP500),
+logrets_sp500 = rowSums( matrix(qstd(U_sim[, 1], mean = mu_sp500, 
+                                     sd = scale_sp500, nu = df_sp500),
                                 nrow = n_sim, ncol = 5) )
 logrets_vix  = rowSums( matrix(qstd(U_sim[, 2], mean = mu_vix, sd = scale_vix,
                             nu = df_vix), nrow = n_sim, ncol = 5) )
 
 
-SP500_new = S0 * exp(logrets_SP500)
+sp500_5d = S0 * exp(logrets_sp500)
 vix_new = VIX * exp(logrets_vix)
 
 # profit and loss distribution for 1 risk driver (1D)
-BV_new = rep(NA, n_sim) # new book value
+BV_5d = rep(NA, n_sim) # new book value
 
-K_vec = c(1600, 1650, 1750, 1800)
-isCall_vec = rep(TRUE, 4)
-TT_vec = c(15, 15, 35, 35)/250.0 # New maturities vector
-
-# Use 1 day and 7 days to interpolate rates for 5 days
-r5 = as.numeric(rates[1]) + ( 5 - 1)/(7 - 1) *
-                 (as.numeric(rates[2]) - as.numeric(rates[1]) ) 
-# Forward rates forward1 between (t1 = 5 days and t2 = 20 days) and
-# forward2 between (t1 = 5 days and t2 = 40 days) assuming continuous 
-# compounding r1,2 = (r2*t2 - r1*t1)/(t2 - t1)
-forward1 = (20*r20 - 5*r5)/(20 -5)
-forward2 = (40*r40 - 5*r5)/(40 -5)
-
-r_vec = c(forward1, forward1, forward2, forward2)
 for (i in 1:n_sim){
-  S_vec = rep(SP500_new[i], 4)
+  S_vec = rep(sp500_5d[i], 4)
   vol_vec = rep(vix_new[i], 4)
-  price_vec = mapply(BS_price, S_vec, K_vec, TT_vec,
-                     vol_vec, r_vec, isCall_vec)
-  BV_new[i] = sum(price_vec)
+  price_vec = mapply(f_BS_price, S_vec, K_vec, TT_vec_5d,
+                     vol_vec, r_vec_5d, isCall_vec)
+  BV_5d[i] = sum(price_vec)
 }
-PL_ststgauss2D = BV_new - V0
+PL_ststgauss2D = BV_5d - V0
 VaR95_ststgauss2D = quantile(PL_ststgauss2D, 0.05)
 ES95_ststgauss2D = mean(PL_ststgauss2D[PL_ststgauss2D <= VaR95_ststgauss2D])
 
-hist(PL_ststgauss2D, breaks = 10 * round(log(n_sim)))
-abline(v = VaR95_ststgauss2D, col = "red", lwd = 2)
+main_title = 
+f_hist(data = PL_ststgauss2D, threshold = VaR95_ststgauss2D, 
+       xlab = "PL_ststgauss2D",
+title = "P&L histogram, student-t distribution for log returns for SP500 and
+vix, normal copula")
 ```
 We model `r n_sim` possible values for the SP500 and the vix in 5 days and 
 use them to estimate the distribution for the P&L in a week (5 days).
@@ -385,54 +426,39 @@ f_obj_fn = function(params, options_data){
   return( sum( abs(sigma_model - IV_vec) ) )
 }
 
-S0 = as.numeric( tail(Market[[1]], n = 1) )
-K_vec = c(1600, 1650, 1750, 1800)
-TT_vec = c(15, 15, 35, 35)/250.0 # New maturities vector
 
-calls_info = Market[[4]]
-puts_info = Market[[5]]
+calls_info = Market$calls
+puts_info = Market$puts
 options_all = rbind(calls_info, puts_info)
 moneyness = options_all[ ,1]/S0
 options_all = cbind(moneyness, options_all)
 
-# Creating 5 days stock paths
 
-# log returns
-SP500_logrets = PerformanceAnalytics::Return.calculate(Market[[1]], 
-                                                       method = "log") 
-SP500_logrets = SP500_logrets[-1] # Get rid of the first line
-vix_logrets = PerformanceAnalytics::Return.calculate(Market[[2]], 
-                                                       method = "log")
-vix_logrets = vix_logrets[-1]
-mu_SP500 = mean(SP500_logrets)
-mu_vix = mean(vix_logrets)
-# Finding mean and variance
-sigma2 = ( length(SP500_logrets) - 1)/(length(SP500_logrets) ) * var(SP500_logrets)
-sigma2_vix = ( length(vix_logrets) - 1)/(length(vix_logrets) ) * var(vix_logrets)
-# Generate n_sim new stock prices scenario
-gauss_rets_SP500 = rowSums( matrix(rnorm( 5 * n_sim, mean = mu_SP500, sd = sqrt(sigma2) ),
+# Generate n_sim new stock prices and volatilities scenario
+gauss_rets_sp500 = rowSums( matrix(rnorm( 5 * n_sim, mean = mu_sp500, 
+                                          sd = sqrt(sigma2_sp500) ),
                             nrow = n_sim, ncol = 5) )
 gauss_rets_vix = rowSums( matrix(rnorm( 5 * n_sim, mean = mu_vix, 
                                         sd = sqrt(sigma2_vix) ), 
                                  nrow = n_sim, ncol = 5) )
-SP500_new = S0 * exp(gauss_rets_SP500)
+sp500_new = S0 * exp(gauss_rets_sp500)
 vix_new = VIX * exp(gauss_rets_vix)
 
-
-# Replace strike by moneyness
+# Solving for parameters alpha1, alpha2, alpha3 and alpha4
 params_vec = rep(0, 4)
 obj_min = 1e6
-n_repeat = 1000
+n_repeat = 100
+
 for (i in 1:n_repeat){
   ini_params = runif(4, min = -5, max = 5)
   fit_params = optim(par = ini_params, f_obj_fn,
                    options_data = options_all)
-  #params_vec = params_vec + fit_params$par
   if(fit_params$value < obj_min){
     obj_min = fit_params$value
     params_vec = fit_params$par
   }
 }
+
 
 #repricing the portfolio 
 
@@ -444,32 +470,22 @@ delta_shift = params_vec[1] + params_vec[4] - VIX
 vix_shift = vix_new + delta_shift
 
 
-# Use 1 day and 7 days to interpolate rates for 5 days
-r5 = as.numeric(rates[1]) + ( 5 - 1)/(7 - 1) *
-                 (as.numeric(rates[2]) - as.numeric(rates[1]) ) 
-# Forward rates forward1 between (t1 = 5 days and t2 = 20 days) and
-# forward2 between (t1 = 5 days and t2 = 40 days) assuming continuous 
-# compounding r1,2 = (r2*t2 - r1*t1)/(t2 - t1)
-forward1 = (20*r20 - 5*r5)/(20 -5)
-forward2 = (40*r40 - 5*r5)/(40 -5)
-
-# profit and loss distribution for 1 risk driver (1D)
 BV_new = rep(NA, n_sim) # new book value
-
-r_vec = c(forward1, forward1, forward2, forward2)
 for (i in 1:n_sim){
-  S_vec = rep(SP500_new[i], 4)
+  S_vec = rep(sp500_new[i], 4)
   vol_vec = rep(vix_shift[i], 4)
-  price_vec = mapply(BS_price, S_vec, K_vec, TT_vec,
-                     vol_vec, r_vec, isCall_vec)
+  price_vec = mapply(f_BS_price, S_vec, K_vec, TT_vec_5d,
+                     vol_vec, r_vec_5d, isCall_vec)
   BV_new[i] = sum(price_vec)
 }
 PL_gauss_volsurf = BV_new - V0
 VaR95_gauss_volsurf = quantile(PL_gauss_volsurf, 0.05)
 ES95_gauss_volsurf = mean(PL_gauss_volsurf[PL_gauss_volsurf <= VaR95_gauss_volsurf])
 
-hist(PL_gauss_volsurf, breaks = 10 * round(log(n_sim)))
-abline(v = VaR95_gauss_volsurf, col = "red", lwd = 2)
+f_hist(data = PL_gauss_volsurf, threshold = VaR95_gauss_volsurf, 
+       xlab = "PL_gauss_volsurf",
+title = "P&L histogram, Gaussian log returns for SP500 and vix,
+vix shifted to match ATM volatility in 1 year ")
 
 ```
 
@@ -486,7 +502,6 @@ and the expected shortfall is ES95 = `r round( abs(ES95_gauss_volsurf), 2)`.
 So we expect the book of options to lose at least 
 `r round(abs(VaR95_gauss_volsurf), 2)` from its initial value 5% of the time.
 
-
 # Full approach
 
 ```{r}
@@ -496,10 +511,10 @@ lib_vec = c("PerformanceAnalytics", "copula", "MASS", "fGarch", "rugarch")
 invisible(lapply(lib_vec, f_install_load_lib)) 
 
 # log returns
-SP500_logrets = PerformanceAnalytics::Return.calculate(Market[[1]], 
+sp500_logrets = PerformanceAnalytics::Return.calculate(Market[[1]], 
                                                        method = "log") 
-SP500_logrets = as.numeric( SP500_logrets[-1] ) # Get rid of the first line
-mu_SP500 =  mean(SP500_logrets)
+sp500_logrets = as.numeric( sp500_logrets[-1] ) # Get rid of the first line
+mu_sp500 =  mean(sp500_logrets)
 
 vix_logrets = PerformanceAnalytics::Return.calculate(Market[[2]], 
                                                        method = "log")
@@ -507,25 +522,25 @@ vix_logrets = as.numeric( vix_logrets[-1] )
 mu_vix = mean(vix_logrets)
 
 ## Fit GARCH(1,1) to log returns of SP500
-fit_GARCH_SP500.spec = ugarchspec(variance.model     = list(model = "sGARCH",
+fit_GARCH_sp500.spec = ugarchspec(variance.model     = list(model = "sGARCH",
                                                  garchOrder = c(1, 1)), 
                        mean.model         = list(armaOrder = c(0, 0),
-                                                 include.mean = TRUE), 
+                                                 include.mean = FALSE), 
                        distribution.model = "norm")
-fit_GARCH_SP500   =  ugarchfit(data = SP500_logrets, 
-                               spec = fit_GARCH_SP500.spec)
-mu_res_SP500 = mean(as.numeric(residuals(fit_GARCH_SP500)))
-sd_res_SP500 = sd(as.numeric(residuals(fit_GARCH_SP500))) * 
-                sqrt( (length(SP500_logrets) - 1) / length(SP500_logrets) )
+fit_GARCH_sp500   =  ugarchfit(data = sp500_logrets, 
+                               spec = fit_GARCH_sp500.spec)
+mu_res_sp500 = mean(as.numeric(residuals(fit_GARCH_sp500)))
+sd_res_sp500 = sd(as.numeric(residuals(fit_GARCH_sp500))) * 
+                sqrt( (length(sp500_logrets) - 1) / length(sp500_logrets) )
 
 # Fit AR(1) to log returns of Vix
 fit_vix = arima(x = vix_logrets, order = c(1,0,0) )
 mu_res_vix = mean(fit_vix$residuals)
-sd_res_vix =  sqrt( (length(SP500_logrets) - 1) / length(SP500_logrets) ) * 
+sd_res_vix =  sqrt( (length(sp500_logrets) - 1) / length(sp500_logrets) ) * 
              sd(fit_vix$residuals)
  
  # Distribution of the marginals
-U1 = pnorm(residuals(fit_GARCH_SP500), mean = mu_res_SP500, sd = sd_res_SP500)
+U1 = pnorm(residuals(fit_GARCH_sp500), mean = mu_res_sp500, sd = sd_res_sp500)
 U2 = pnorm(fit_vix$residuals , mean = mu_res_vix, sd = sd_res_vix)
 U = cbind(U1, U2)
 
@@ -535,63 +550,66 @@ fit = fitCopula(C, data = U, method = "ml")
 
  # Generate draws for the invariants
 U_sim = rCopula( 5 * n_sim, fit@copula)
-res_SP500 = qnorm(U_sim[ , 1],  mean = mu_res_SP500, sd = sd_res_SP500)
+res_sp500 = qnorm(U_sim[ , 1],  mean = mu_res_sp500, sd = sd_res_sp500)
 res_vix = qnorm(U_sim[ , 2],  mean = mu_res_vix, sd = sd_res_vix)
-logrets_SP500 = rep( tail(SP500_logrets, 1), n_sim)
+logrets_sp500 = rep( tail(sp500_logrets, 1), n_sim)
+
 # Fitted conditional std
-sigma2_SP500 = tail(fit_GARCH_SP500@fit$sigma, 1)^2 
+sigma2_sp500 = rep( tail(fit_GARCH_sp500@fit$sigma, 1)^2, n_sim) 
 logrets_vix = rep( tail(vix_logrets, 1), n_sim)
 for(i in 1:5){
-  #logrets_vix = mu_vix + as.numeric(fit_vix$coef[2]) +
-  #  as.numeric(fit_vix$coef[1]) * (logrets_vix - mu_vix) +
-  #  res_vix[( (i-1) * n_sim + 1 ) : (i * n_sim) ]
   
   logrets_vix = mu_vix + as.numeric(fit_vix$coef["intercept"]) +
     as.numeric(fit_vix$coef["ar1"]) * (logrets_vix - mu_vix) +
     res_vix[( (i-1) * n_sim + 1 ) : (i * n_sim) ]
   
-  sigma2_SP500 = as.numeric( fit_GARCH_SP500@fit$coef["omega"] ) +
-    as.numeric( fit_GARCH_SP500@fit$coef["alpha1"] ) * logrets_SP500^2 + 
-    as.numeric(fit_GARCH_SP500@fit$coef["beta1"]) * sigma2_SP500
+  #sigma2_sp500 = as.numeric( fit_GARCH_sp500@fit$coef["omega"] ) +
+  #  as.numeric( fit_GARCH_sp500@fit$coef["alpha1"] ) * logrets_sp500^2 + 
+  #  as.numeric(fit_GARCH_sp500@fit$coef["beta1"]) * sigma2_sp500
   
-  #logrets_SP500 =  as.numeric( fit_GARCH_SP500@fit$coef["mu"] ) + 
-  #  sigma2_SP500^0.5 * rnorm(n_sim) + 
-  #  res_SP500[( (i-1) * n_sim + 1 ) : (i * n_sim) ]
+  sigma2_sp500 = as.numeric( fit_GARCH_sp500@fit$coef["omega"] ) +
+    as.numeric( fit_GARCH_sp500@fit$coef["alpha1"] ) * logrets_sp500^2 + 
+    as.numeric(fit_GARCH_sp500@fit$coef["beta1"]) * sigma2_sp500
   
-  logrets_SP500 =  as.numeric( fit_GARCH_SP500@fit$coef["mu"] ) + 
-    res_SP500[( (i-1) * n_sim + 1 ) : (i * n_sim) ]
+  logrets_sp500 = res_sp500[( (i-1) * n_sim + 1 ) : (i * n_sim) ] * 
+    sigma2_sp500^0.5
 }
 
-SP500_new = S0 * exp(logrets_SP500)
+sp500_new = S0 * exp(logrets_sp500)
 vix_new = VIX * exp(logrets_vix)
 
-
-# Use 1 day and 7 days to interpolate rates for 5 days
-r5 = as.numeric(rates[1]) + ( 5 - 1)/(7 - 1) *
-                 (as.numeric(rates[2]) - as.numeric(rates[1]) ) 
-# Forward rates forward1 between (t1 = 5 days and t2 = 20 days) and
-# forward2 between (t1 = 5 days and t2 = 40 days) assuming continuous 
-# compounding r1,2 = (r2*t2 - r1*t1)/(t2 - t1)
-forward1 = (20*r20 - 5*r5)/(20 -5)
-forward2 = (40*r40 - 5*r5)/(40 -5)
 
 # profit and loss distribution for 1 risk driver (1D)
 BV_new = rep(NA, n_sim) # new book value
 
-r_vec = c(forward1, forward1, forward2, forward2)
 for (i in 1:n_sim){
-  S_vec = rep(SP500_new[i], 4)
+  S_vec = rep(sp500_new[i], 4)
   vol_vec = rep(vix_new[i], 4)
-  price_vec = mapply(BS_price, S_vec, K_vec, TT_vec,
-                     vol_vec, r_vec, isCall_vec)
+  price_vec = mapply(f_BS_price, S_vec, K_vec, TT_vec_5d,
+                     vol_vec, r_vec_5d, isCall_vec)
   BV_new[i] = sum(price_vec)
 }
 PL_full = BV_new - V0
 VaR95_full = quantile(PL_full, 0.05)
 ES95_full = mean(PL_full[PL_full <= VaR95_full])
 
-hist(PL_full, breaks = 10 * round(log(n_sim)))
-abline(v = VaR95_full, col = "red", lwd = 2)
-
+f_hist(data = PL_full, threshold = VaR95_full, 
+       xlab = "PL_full_approach",
+title = "P&L histogram, log returns for SP500 and vix follows
+GARCH(1,1) and AR(1) and residuals linked by Gaussian copula")
 
 ```
+
+Here, we fit a GARCH(1,1) to the log returns of the SP500 and a AR(1) process 
+to the log returns of the VIX. The residuals of the two processes are 
+assumed to be invariants and to be linked by a Gaussian copula.
+We generate `r n_sim` possible values for the SP500 and the vix in 5 days and 
+use them to estimate the distribution for the P&L in a week (5 days).
+The distribution of the P\&L is given in Figure \ref{fig:PLdist_gauss_volsurf}.
+
+
+The VaR at risk at the 95% confidence level is
+VaR95 = `r round(abs(VaR95_full), 2)`
+and the expected shortfall is ES95 = `r round( abs(ES95_full), 2)`.
+So we expect the book of options to lose at least 
+`r round(abs(VaR95_full), 2)` from its initial value 5% of the time.
