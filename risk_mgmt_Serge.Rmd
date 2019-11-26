@@ -171,13 +171,14 @@ vol_vec = rep(VIX, 4)
 isCall_vec = rep(TRUE, 4)
 
 # rates at 20 and 40 days
-r20 = f_rf_interpolate(t1 = 20.0/250.0, rf = Market$rf)
-r40 = f_rf_interpolate(t1 = 40.0/250.0, rf = Market$rf)
+r5 = f_rf_interpolate(t1 = 5.0/360., rf = Market$rf)
+r20 = f_rf_interpolate(t1 = 20.0/360., rf = Market$rf)
+r40 = f_rf_interpolate(t1 = 40.0/360., rf = Market$rf)
 r_vec_now = c(r20, r20, r40, r40)
 
 # Forward rates between (5 and 20 days) and (5 and 40 days)
-fwd_5_20 = f_fwd_rate(t1 = 5./250., t2 = 20./250., rf = Market$rf)
-fwd_5_40 = f_fwd_rate(t1 = 5./250., t2 = 40./250., rf = Market$rf)
+fwd_5_20 = f_fwd_rate(t1 = 5./360., t2 = 20./360., rf = Market$rf)
+fwd_5_40 = f_fwd_rate(t1 = 5./360., t2 = 40./360., rf = Market$rf)
 r_vec_5d = c(fwd_5_20, fwd_5_20, fwd_5_40, fwd_5_40)
 
 # mean, variance of sp500 and vix log-returns
@@ -230,7 +231,6 @@ parameters given by the mean and standard deviation from the historical values.
 
 ```{r PLdist_gauss1D, fig.cap = "\\label{fig:PLdist_gauss1D} P&L distribution for normal log returns of the SP500. The red line represents the value at risk at 95% probability.", fig.align = "center"}
 set.seed(2019)
-
 # Generate n_sim new stock prices scenario
 gauss_rets_sp500 = rowSums(matrix(rnorm(5 * n_sim, mean = mu_sp500,
                    sd = sqrt(sigma2_sp500)), nrow = n_sim, ncol = 5))
@@ -245,7 +245,7 @@ for (i in 1:n_sim){
                      vol_vec, r_vec_5d, isCall_vec)
   BV_5d[i] = sum(price_vec)
 }
-PL_gauss1D = BV_5d - V0
+PL_gauss1D = exp(-r5) * BV_5d - V0
 VaR95_gauss1D = quantile(PL_gauss1D, 0.05)
 ES95_gauss1D = mean(PL_gauss1D[PL_gauss1D <= VaR95_gauss1D])
 
@@ -274,16 +274,23 @@ values.
 ```{r PLdist_gauss2D, fig.cap = "\\label{fig:PLdist_gauss2D} P&L distribution for normal log returns of the SP500 and the vix. The red line represents the value at risk at 95% probability."}
 
 set.seed(2019)
+lib_vec = c("mnormt")
+invisible(lapply(lib_vec, f_install_load_lib)) 
+
+# Gaussian model (MLE)
+rets = cbind(sp500_logrets, vix_logrets)
+n <- nrow(rets)
+mu_gauss_biv <- colMeans(rets)
+Sigma_gauss_biv <- ((n - 1) / n) * cov(rets)
+M1 <- list(mu = mu_gauss_biv, Sigma = Sigma_gauss_biv)
+
+tmp_biv = rmnorm(n = 5 * n_sim, mean = M1$mu, varcov = M1$Sigma)
 
 # Generate n_sim new stock prices scenario
-gauss_rets_sp500 = rowSums( matrix(rnorm( 5 * n_sim, mean = mu_sp500,
-                                          sd = sqrt(sigma2_sp500) ),
-                            nrow = n_sim, ncol = 5) )
-gauss_rets_vix = rowSums( matrix(rnorm( 5 * n_sim, mean = mu_vix, 
-                                        sd = sqrt(sigma2_vix) ), 
-                                 nrow = n_sim, ncol = 5) )
+gauss_rets_sp500 = rowSums(matrix( tmp_biv[ , 1], nrow = n_sim, ncol = 5) )
+gauss_rets_vix =  rowSums(matrix( tmp_biv[ , 2], nrow = n_sim, ncol = 5) )
 sp500_5d = S0 * exp(gauss_rets_sp500)
-vix_new = VIX * exp(gauss_rets_vix)
+vix_5d = VIX * exp(gauss_rets_vix)
 
 # profit and loss distribution for 1 risk driver (1D)
 BV_5d = rep(NA, n_sim) # new book value
@@ -291,12 +298,12 @@ BV_5d = rep(NA, n_sim) # new book value
 r_vec = c(fwd_5_20, fwd_5_20, fwd_5_40, fwd_5_40)
 for (i in 1:n_sim){
   S_vec = rep(sp500_5d[i], 4)
-  vol_vec = rep(vix_new[i], 4)
+  vol_vec = rep(vix_5d[i], 4)
   price_vec = mapply(f_BS_price, S_vec, K_vec, TT_vec_5d,
                      vol_vec, r_vec, isCall_vec)
   BV_5d[i] = sum(price_vec)
 }
-PL_gauss2D = BV_5d - V0
+PL_gauss2D = exp(-r5) * BV_5d - V0
 VaR95_gauss2D = quantile(PL_gauss2D, 0.05)
 ES95_gauss2D = mean(PL_gauss2D[PL_gauss2D <= VaR95_gauss2D])
 
@@ -368,19 +375,19 @@ logrets_vix  = rowSums( matrix(qstd(U_sim[, 2], mean = mu_vix, sd = scale_vix,
 
 
 sp500_5d = S0 * exp(logrets_sp500)
-vix_new = VIX * exp(logrets_vix)
+vix_5d = VIX * exp(logrets_vix)
 
 # profit and loss distribution for 1 risk driver (1D)
 BV_5d = rep(NA, n_sim) # new book value
 
 for (i in 1:n_sim){
   S_vec = rep(sp500_5d[i], 4)
-  vol_vec = rep(vix_new[i], 4)
+  vol_vec = rep(vix_5d[i], 4)
   price_vec = mapply(f_BS_price, S_vec, K_vec, TT_vec_5d,
                      vol_vec, r_vec_5d, isCall_vec)
   BV_5d[i] = sum(price_vec)
 }
-PL_ststgauss2D = BV_5d - V0
+PL_ststgauss2D = exp(-r5) * BV_5d - V0
 VaR95_ststgauss2D = quantile(PL_ststgauss2D, 0.05)
 ES95_ststgauss2D = mean(PL_ststgauss2D[PL_ststgauss2D <= VaR95_ststgauss2D])
 
@@ -406,6 +413,9 @@ So we expect the book of options to lose at least
 ```{r }
 
 set.seed(2019)
+lib_vec = c("mnormt")
+invisible(lapply(lib_vec, f_install_load_lib)) 
+
 f_parametric_IV = function(params, m, tau){
   alpha1 = params[1]
   alpha2 = params[2]
@@ -433,16 +443,20 @@ options_all = rbind(calls_info, puts_info)
 moneyness = options_all[ ,1]/S0
 options_all = cbind(moneyness, options_all)
 
+# Gaussian model (MLE)
+rets = cbind(sp500_logrets, vix_logrets)
+n <- nrow(rets)
+mu_gauss_biv <- colMeans(rets)
+Sigma_gauss_biv <- ((n - 1) / n) * cov(rets)
+M1 <- list(mu = mu_gauss_biv, Sigma = Sigma_gauss_biv)
 
-# Generate n_sim new stock prices and volatilities scenario
-gauss_rets_sp500 = rowSums( matrix(rnorm( 5 * n_sim, mean = mu_sp500, 
-                                          sd = sqrt(sigma2_sp500) ),
-                            nrow = n_sim, ncol = 5) )
-gauss_rets_vix = rowSums( matrix(rnorm( 5 * n_sim, mean = mu_vix, 
-                                        sd = sqrt(sigma2_vix) ), 
-                                 nrow = n_sim, ncol = 5) )
-sp500_new = S0 * exp(gauss_rets_sp500)
-vix_new = VIX * exp(gauss_rets_vix)
+tmp_biv = rmnorm(n = 5 * n_sim, mean = M1$mu, varcov = M1$Sigma)
+
+# Generate n_sim new stock prices scenario
+gauss_rets_sp500 = rowSums(matrix( tmp_biv[ , 1], nrow = n_sim, ncol = 5) )
+gauss_rets_vix =  rowSums(matrix( tmp_biv[ , 2], nrow = n_sim, ncol = 5) )
+sp500_5d = S0 * exp(gauss_rets_sp500)
+vix_5d = VIX * exp(gauss_rets_vix)
 
 # Solving for parameters alpha1, alpha2, alpha3 and alpha4
 params_vec = rep(0, 4)
@@ -467,18 +481,18 @@ delta_shift = params_vec[1] + params_vec[4] - VIX
 
 
 #  Volatility in 5 days
-vix_shift = vix_new + delta_shift
+vix_shift = vix_5d + delta_shift
 
 
 BV_new = rep(NA, n_sim) # new book value
 for (i in 1:n_sim){
-  S_vec = rep(sp500_new[i], 4)
+  S_vec = rep(sp500_5d[i], 4)
   vol_vec = rep(vix_shift[i], 4)
   price_vec = mapply(f_BS_price, S_vec, K_vec, TT_vec_5d,
                      vol_vec, r_vec_5d, isCall_vec)
   BV_new[i] = sum(price_vec)
 }
-PL_gauss_volsurf = BV_new - V0
+PL_gauss_volsurf = exp(-r5) * BV_new - V0
 VaR95_gauss_volsurf = quantile(PL_gauss_volsurf, 0.05)
 ES95_gauss_volsurf = mean(PL_gauss_volsurf[PL_gauss_volsurf <= VaR95_gauss_volsurf])
 
@@ -511,14 +525,7 @@ lib_vec = c("PerformanceAnalytics", "copula", "MASS", "fGarch", "rugarch")
 invisible(lapply(lib_vec, f_install_load_lib)) 
 
 # log returns
-sp500_logrets = PerformanceAnalytics::Return.calculate(Market[[1]], 
-                                                       method = "log") 
-sp500_logrets = as.numeric( sp500_logrets[-1] ) # Get rid of the first line
 mu_sp500 =  mean(sp500_logrets)
-
-vix_logrets = PerformanceAnalytics::Return.calculate(Market[[2]], 
-                                                       method = "log")
-vix_logrets = as.numeric( vix_logrets[-1] )
 mu_vix = mean(vix_logrets)
 
 ## Fit GARCH(1,1) to log returns of SP500
@@ -559,13 +566,9 @@ sigma2_sp500 = rep( tail(fit_GARCH_sp500@fit$sigma, 1)^2, n_sim)
 logrets_vix = rep( tail(vix_logrets, 1), n_sim)
 for(i in 1:5){
   
-  logrets_vix = mu_vix + as.numeric(fit_vix$coef["intercept"]) +
-    as.numeric(fit_vix$coef["ar1"]) * (logrets_vix - mu_vix) +
+  logrets_vix = as.numeric(fit_vix$coef["intercept"]) +
+    as.numeric(fit_vix$coef["ar1"]) * logrets_vix  +
     res_vix[( (i-1) * n_sim + 1 ) : (i * n_sim) ]
-  
-  #sigma2_sp500 = as.numeric( fit_GARCH_sp500@fit$coef["omega"] ) +
-  #  as.numeric( fit_GARCH_sp500@fit$coef["alpha1"] ) * logrets_sp500^2 + 
-  #  as.numeric(fit_GARCH_sp500@fit$coef["beta1"]) * sigma2_sp500
   
   sigma2_sp500 = as.numeric( fit_GARCH_sp500@fit$coef["omega"] ) +
     as.numeric( fit_GARCH_sp500@fit$coef["alpha1"] ) * logrets_sp500^2 + 
@@ -576,7 +579,7 @@ for(i in 1:5){
 }
 
 sp500_new = S0 * exp(logrets_sp500)
-vix_new = VIX * exp(logrets_vix)
+vix_5d = VIX * exp(logrets_vix)
 
 
 # profit and loss distribution for 1 risk driver (1D)
@@ -584,12 +587,12 @@ BV_new = rep(NA, n_sim) # new book value
 
 for (i in 1:n_sim){
   S_vec = rep(sp500_new[i], 4)
-  vol_vec = rep(vix_new[i], 4)
+  vol_vec = rep(vix_5d[i], 4)
   price_vec = mapply(f_BS_price, S_vec, K_vec, TT_vec_5d,
                      vol_vec, r_vec_5d, isCall_vec)
   BV_new[i] = sum(price_vec)
 }
-PL_full = BV_new - V0
+PL_full = exp(-r5) * BV_new - V0
 VaR95_full = quantile(PL_full, 0.05)
 ES95_full = mean(PL_full[PL_full <= VaR95_full])
 
