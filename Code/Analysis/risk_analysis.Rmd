@@ -1,0 +1,694 @@
+---
+title: "Travaux Pratiques 2: Risk Management"
+output:
+  bookdown::html_document2:
+  html_document:
+ #  df_print: paged
+ # pdf_document: default
+---
+
+
+```{r, echo = FALSE}
+
+# Setting global options for the document
+knitr::opts_chunk$set(echo = FALSE)
+knitr::opts_chunk$set(message = FALSE)
+knitr::opts_chunk$set(fig.align = "center")
+opts_knit$set(eval.after = "fig.cap")
+
+```
+```{r}
+
+# Include f_utils file that contains functions used later such as
+# Black-Scholes pricer, rate interpolation, forward rate calculator, etc ...
+source(here("Code", "Src", "f_utils.R"))
+
+# Load market data
+load(here("Data", "Original", "Market.rda"))
+
+```
+
+
+# Loading the data
+The file **Market.rda** contains the list **Market**.
+
+The first element of the list **Market** is an xts object corresponding to the 
+value of the SP500 index from "2000-01-03" until "2013-09-10".
+
+The second element vix corresponds to the value of the VIX  index at the same 
+dates.
+
+The third element rf corresponds to the term structure on "2013-09-10" for 14
+maturities varying from 1 day to 30 years.
+The term structure for the interest rates can be seen in 
+Figure \@ref(fig:ratestructure) .
+```{r ratestructure, fig.cap = my_caption }
+my_caption = " Interest rates term structure."
+x_plot = as.numeric(names(Market$rf) )
+y_plot = 100 * as.numeric(Market$rf)
+plot(x = x_plot , y = y_plot , type = "l", lwd = 2, col = "blue",
+     xlab = "Maturities (years)", ylab = "Interest rates (%)")
+points(x = x_plot, y = y_plot, col = "blue", pch = 16)
+```
+
+The fourth (calls) and the fifth (puts) contains the strikes (K), 
+maturities (tau) and implied volatilities (IV) for calls and puts options 
+respectively.
+
+We plot the volatility surface in Figure \@ref(fig:surfvolputs) .
+
+
+```{r surfvolputs, fig.cap = my_caption }
+my_caption = " Volatility surface for the options in the list **Market**."
+lib_vec = c("xts", "rgl", "akima", "knitr", "plotly")
+invisible(lapply(lib_vec, f_install_load_lib)) # no output from lapply
+
+# Volatility surface
+
+obs_option = rbind(Market$puts, Market$calls)
+#obs_option = Market$puts
+strike_mkt = obs_option[, 1]
+tau_mkt =  obs_option[, 2]
+IV_mkt =  obs_option[, 3]
+
+
+x = tau_mkt
+y = strike_mkt
+z = IV_mkt
+n_interpolation = 500
+# Use linear interpolation to create values for a surface plot
+spline_interpolated = interp(x = x,
+                             y = y,
+                             z = z,
+                             duplicate = "mean",
+                             xo = seq(min(x), max(x), length = n_interpolation),
+                             yo = seq(min(y), max(y), length = n_interpolation),
+                             linear = TRUE, extrap = FALSE)
+
+x.si = spline_interpolated$x
+y.si = spline_interpolated$y
+z.si = spline_interpolated$z
+
+p = plot_ly(x = x.si, y = y.si, z = z.si, type = "surface") %>%
+layout( scene = list( xaxis = list(title = "Maturities"),
+                      yaxis = list(title = "Strikes"),
+                      zaxis = list(title = "IV"),
+                      camera = list(eye = list(x = 1.5, y = 1.5, z = 1.5) )
+                      )
+        )
+
+# Print the plot
+p 
+
+```
+
+
+
+```{r}
+
+# Initializing recurrent variables
+
+S0 = as.numeric(tail(Market$sp500, n = 1)) # Current index value
+VIX = as.numeric(tail(Market$vix, n = 1)) # Current vix value
+
+# Preparing the vectors
+S_vec = rep(S0, 4)
+K_vec = c(1600, 1650, 1750, 1800)
+n_days_now = c(20, 20, 40, 40)
+n_days_5d = c(15, 15 , 35, 35)
+TT_vec_now = n_days_now / 250.0
+TT_vec_5d = n_days_5d / 250.0
+vol_vec = rep(VIX, 4)
+isCall_vec = rep(TRUE, 4)
+
+# rates at 20 and 40 days
+r5 = f_rf_interpolate(t1 = 5.0 / 360., rf = Market$rf)
+r20 = f_rf_interpolate(t1 = 20.0 / 360., rf = Market$rf)
+r40 = f_rf_interpolate(t1 = 40.0 / 360., rf = Market$rf)
+r_vec_now = c(r20, r20, r40, r40)
+
+# Forward rates between (5 and 20 days) and (5 and 40 days)
+fwd_5_20 = f_fwd_rate(t1 = 5. / 360.,
+                      t2 = 20. / 360.,
+                      rf = Market$rf)
+fwd_5_40 = f_fwd_rate(t1 = 5. / 360.,
+                      t2 = 40. / 360.,
+                      rf = Market$rf)
+
+r_vec_5d = c(fwd_5_20, fwd_5_20, fwd_5_40, fwd_5_40)
+
+# mean, variance of sp500 and vix log-returns
+n_sim = 10000L
+lib_vec = c("PerformanceAnalytics")
+invisible(lapply(lib_vec, f_install_load_lib))
+
+# log-returns
+sp500_logrets = PerformanceAnalytics::Return.calculate(Market$sp500,
+                                                       method = "log")
+sp500_logrets = sp500_logrets[-1] # Get rid of the first line
+vix_logrets = PerformanceAnalytics::Return.calculate(Market$vix,
+                                                     method = "log")
+vix_logrets = vix_logrets[-1]
+mu_sp500 = mean(sp500_logrets)
+mu_vix = mean(vix_logrets)
+# Finding mean and variance
+sigma2_sp500 = (length(sp500_logrets) - 1) / (length(sp500_logrets)) *
+  var(sp500_logrets)
+sigma2_vix = (length(vix_logrets) - 1) / (length(vix_logrets)) *
+  var(vix_logrets)
+
+```
+# Pricing of a portfolio of options
+
+```{r}
+
+price_vec = f_vBS_price(S_vec,
+                        K_vec,
+                        TT_vec_now,
+                        vol_vec,
+                        r_vec_now,
+                        isCall_vec)
+V0 = sum(price_vec)
+options_df = data.frame(
+  "S0" = S_vec,
+  "K" = K_vec,
+  "tau" = TT_vec_now,
+  "sigma" = vol_vec,
+  "r" = round(r_vec_now, 6),
+  "C" = round(price_vec, 3)
+)
+
+```
+
+The prices of the call options using the Black-Scholes formula are given in 
+table \@ref(tab:bookCalls) .
+
+```{r}
+
+knitr::kable(options_df, caption = "Prices of the (call) options in our book",
+             label = "bookCalls" )
+
+```
+
+The price of this book (the sum of prices of the calls that constitutes 
+the book) is $V_0$ = `r round(V0, 2)`.
+
+# One risk driver and Gaussian model
+
+In this section, we assume that the risk of our book of options is driven by 
+a single factor namely the change in price of the SP500 index.
+The log-returns of the index are assumed to follow a normal distribution with 
+parameters given by the mean and standard deviation from the historical values.
+
+```{r gauss1D, fig.cap = my_caption}
+
+set.seed(2019)
+# Generate n_sim new stock prices scenario
+gauss_rets_sp500 = rowSums(matrix(
+  rnorm(5 * n_sim, mean = mu_sp500,
+        sd = sqrt(sigma2_sp500)),
+  nrow = n_sim,
+  ncol = 5
+))
+sp500_5d = S0 * exp(gauss_rets_sp500)
+
+# profit and loss distribution for 1 risk driver (1D)
+BV_5d = rep(NA, n_sim) # new book value
+
+for (i in 1:n_sim) {
+  S_vec = rep(as.numeric(sp500_5d[i]), 4)
+  price_vec = f_vBS_price(S_vec,
+                          K_vec,
+                          TT_vec_5d,
+                          vol_vec,
+                          r_vec_5d,
+                          isCall_vec)
+  BV_5d[i] = sum(price_vec)
+}
+PL_gauss1D = exp(-5/360 * r5) * BV_5d - V0
+VaR95_gauss1D = quantile(PL_gauss1D, 0.05)
+ES95_gauss1D = mean(PL_gauss1D[PL_gauss1D <= VaR95_gauss1D])
+
+f_hist(
+  data = PL_gauss1D,
+  threshold = VaR95_gauss1D,
+  xlab = "PL_gauss1D"
+)
+
+my_caption = paste("P&L distribution for normal log-returns of the SP500.",
+                   "The red line at", round(VaR95_gauss1D, 2),
+                   "is the value at risk at 95% probability.")
+
+```
+
+We model `r n_sim` possible values for the stocks in 5 days and 
+use them to estimate the distribution for the P&L in a week (5 days).
+The distribution of the P\&L is given in Figure \@ref(fig:gauss1D) .
+
+The VaR at risk at the 95% confidence level is
+VaR95 = `r round(VaR95_gauss1D, 2)`
+and the expected shortfall is ES95 = `r round(ES95_gauss1D, 2)`.
+So we expect the book of options to lose at least 
+`r round(abs(VaR95_gauss1D), 2)` from its initial value 5% of the time.  
+
+# Two risk drivers and Gaussian model
+
+In this section, we assume that the risk of our book of options is driven by 
+two factors namely the change in price of the SP500 index and the volatility 
+of the market (given by the VIX).
+The log-returns of the SP500 and the VIX are assumed to follow a normal distribution with parameters given by the mean and standard deviation from the historical 
+values.
+
+```{r gauss2D, fig.cap = my_caption}
+
+set.seed(2019)
+lib_vec = c("mnormt")
+invisible(lapply(lib_vec, f_install_load_lib))
+
+# Gaussian model (MLE)
+rets = cbind(sp500_logrets, vix_logrets)
+n <- nrow(rets)
+mu_gauss_biv <- colMeans(rets)
+Sigma_gauss_biv <- ((n - 1) / n) * cov(rets)
+
+M1 <- list(mu = mu_gauss_biv, Sigma = Sigma_gauss_biv)
+
+tmp_biv = rmnorm(n = 5 * n_sim,
+                 mean = M1$mu,
+                 varcov = M1$Sigma)
+
+# Generate n_sim new stock prices scenario
+gauss_rets_sp500 = rowSums(matrix(tmp_biv[, 1], nrow = n_sim, ncol = 5))
+gauss_rets_vix =  rowSums(matrix(tmp_biv[, 2], nrow = n_sim, ncol = 5))
+sp500_5d = S0 * exp(gauss_rets_sp500)
+vix_5d = VIX * exp(gauss_rets_vix)
+
+# profit and loss distribution for 1 risk driver (1D)
+BV_5d = rep(NA, n_sim) # new book value
+
+r_vec = c(fwd_5_20, fwd_5_20, fwd_5_40, fwd_5_40)
+for (i in 1:n_sim) {
+  S_vec = rep(sp500_5d[i], 4)
+  vol_vec = rep(vix_5d[i], 4)
+  price_vec = f_vBS_price(S_vec,
+                          K_vec,
+                          TT_vec_5d,
+                          vol_vec,
+                          r_vec,
+                          isCall_vec)
+  BV_5d[i] = sum(price_vec)
+}
+PL_gauss2D = exp(-5/360 * r5) * BV_5d - V0
+VaR95_gauss2D = quantile(PL_gauss2D, 0.05)
+ES95_gauss2D = mean(PL_gauss2D[PL_gauss2D <= VaR95_gauss2D])
+
+f_hist(
+  data = PL_gauss2D,
+  threshold = VaR95_gauss2D,
+  xlab = "PL_gauss2D"
+)
+
+my_caption = paste("P&L distribution when log-returns of SP500 and VIX are
+                   assumed to follow a bivariate normal distribution.
+                   The red line at", round(VaR95_gauss2D, 2),
+                   "represents the value at risk at 95% probability.")
+
+```
+We model `r n_sim` possible values for the SP500 and the VIX in 5 days and 
+use them to estimate the distribution for the P&L in a week (5 days).
+The distribution of the P\&L is given in Figure \@ref(fig:gauss2D) .
+
+The VaR at risk at the 95% confidence level is
+VaR95 = `r round(VaR95_gauss2D, 2)`
+and the expected shortfall is ES95 = `r round(ES95_gauss2D, 2)`.
+So we expect the book of options to lose at least 
+`r round(abs(VaR95_gauss2D), 2)` from its initial value 5% of the time.
+
+# Two risk drivers and copula-marginal model (Student-t and Gaussian copula)
+
+In this section, we assume that the risk of our book of options is driven by 
+two factors namely the change in price of the SP500 index and the volatility 
+of the market (given by the VIX).
+The log-returns of the SP500 are assumed to follow a Student-t distribution with 
+$\nu = 10$ degrees of freedom and the log-returns of the VIX are assumed to
+follow  a Student-t distribution with  $\nu = 5$ degrees of freedom.
+A normal Copula is assumed to merge the marginals.
+
+```{r ststgauss2D, fig.cap = my_caption }
+
+set.seed(2019)
+n_sim = 10000L
+lib_vec = c("PerformanceAnalytics", "copula", "MASS", "fGarch")
+invisible(lapply(lib_vec, f_install_load_lib))
+
+df_sp500 = 10L
+df_vix = 5L
+
+# Fit student-t distributions
+fit_sp500 =  suppressWarnings(fitdistr(sp500_logrets, "t", df = df_sp500))
+fit_vix =  suppressWarnings(fitdistr(vix_logrets, "t", df = df_vix))
+
+# Finding location and scale parameters of student-t distribution
+mu_sp500 = as.numeric(fit_sp500$estimate[1])
+mu_vix = as.numeric(fit_vix$estimate[1])
+
+scale_sp500 = as.numeric(fit_sp500$estimate[2])
+scale_vix = as.numeric(fit_vix$estimate[2])
+
+# Merging using a normal Copula
+
+U_sp500 = pstd(sp500_logrets,
+               mean = mu_sp500,
+               sd = scale_sp500,
+               nu = df_sp500)
+U_vix = pstd(vix_logrets,
+             mean = mu_vix,
+             sd = scale_vix,
+             nu = df_vix)
+U = cbind(as.numeric(U_sp500), as.numeric(U_vix))
+
+C = normalCopula(dim = 2)
+
+fit = fitCopula(C, data = U, method = "ml")
+
+# Generating 5 days returns with the required relationship
+U_sim = rCopula(5 * n_sim, fit@copula)
+logrets_sp500 = rowSums(matrix(
+  qstd(
+    U_sim[, 1],
+    mean = mu_sp500,
+    sd = scale_sp500,
+    nu = df_sp500
+  ),
+  nrow = n_sim,
+  ncol = 5
+))
+logrets_vix  = rowSums(matrix(
+  qstd(
+    U_sim[, 2],
+    mean = mu_vix,
+    sd = scale_vix,
+    nu = df_vix
+  ),
+  nrow = n_sim,
+  ncol = 5
+))
+
+
+sp500_5d = S0 * exp(logrets_sp500)
+vix_5d = VIX * exp(logrets_vix)
+
+# profit and loss distribution for 1 risk driver (1D)
+BV_5d = rep(NA, n_sim) # new book value
+
+for (i in 1:n_sim) {
+  S_vec = rep(sp500_5d[i], 4)
+  vol_vec = rep(vix_5d[i], 4)
+  price_vec = f_vBS_price(S_vec,
+                         K_vec,
+                         TT_vec_5d,
+                         vol_vec,
+                         r_vec_5d,
+                         isCall_vec)
+  BV_5d[i] = sum(price_vec)
+}
+PL_ststgauss2D = exp(-5/360 * r5) * BV_5d - V0
+VaR95_ststgauss2D = quantile(PL_ststgauss2D, 0.05)
+ES95_ststgauss2D = mean(PL_ststgauss2D[PL_ststgauss2D <= VaR95_ststgauss2D])
+
+main_title =
+  f_hist(
+    data = PL_ststgauss2D,
+    threshold = VaR95_ststgauss2D,
+    xlab = "PL_ststgauss2D"
+  )
+
+my_caption = paste("P&L distribution when log-returns of the SP500 and 
+                   the VIX are assumed to have Student-t marginals and their
+                   marginals to be linked by a Gaussian copula . 
+                   The red line at ", round(VaR95_ststgauss2D, 2), 
+                   " represents the value at risk at 95% probability.")
+```
+We model `r n_sim` possible values for the SP500 and the VIX in 5 days and 
+use them to estimate the distribution for the P&L in a week (5 days).
+The distribution of the P\&L is given in Figure \@ref(fig:ststgauss2D) .
+
+The VaR at risk at the 95% confidence level is
+VaR95 = `r round(VaR95_ststgauss2D, 2)`
+and the expected shortfall is ES95 = `r round(ES95_ststgauss2D, 2)`.
+So we expect the book of options to lose at least 
+`r round(abs(VaR95_ststgauss2D), 2)` from its initial value 5% of the time.
+
+
+# Volatility surface
+
+```{r volsurf, fig.cap = my_caption }
+
+set.seed(2019)
+lib_vec = c("mnormt")
+invisible(lapply(lib_vec, f_install_load_lib))
+
+f_parametric_IV = function(params, m, tau) {
+  alpha1 = params[1]
+  alpha2 = params[2]
+  alpha3 = params[3]
+  alpha4 = params[4]
+  
+  stopifnot(length(m) == length(tau)) #Check moneyness and tau have same length
+  sigma = alpha1 + alpha2 * (m - 1) ** 2 + alpha3 * (m - 1) ** 3 +
+    alpha4 * sqrt(tau)
+  return(sigma)
+}
+
+f_obj_fn = function(params, options_data) {
+  m_vec = options_data[, 1]
+  tau_vec = options_data[, 3]
+  IV_vec = options_data[, 4]
+  sigma_model = f_parametric_IV(params, m_vec, tau_vec)
+  return(sum(abs(sigma_model - IV_vec)))
+}
+
+
+calls_info = Market$calls
+puts_info = Market$puts
+options_all = rbind(calls_info, puts_info)
+moneyness = options_all[, 1] / S0
+options_all = cbind(moneyness, options_all)
+
+# Gaussian model (MLE)
+rets = cbind(sp500_logrets, vix_logrets)
+n <- nrow(rets)
+mu_gauss_biv <- colMeans(rets)
+Sigma_gauss_biv <- ((n - 1) / n) * cov(rets)
+M1 <- list(mu = mu_gauss_biv, Sigma = Sigma_gauss_biv)
+
+tmp_biv = rmnorm(n = 5 * n_sim,
+                 mean = M1$mu,
+                 varcov = M1$Sigma)
+
+# Generate n_sim new stock prices scenario
+gauss_rets_sp500 = rowSums(matrix(tmp_biv[, 1], nrow = n_sim, ncol = 5))
+gauss_rets_vix =  rowSums(matrix(tmp_biv[, 2], nrow = n_sim, ncol = 5))
+sp500_5d = S0 * exp(gauss_rets_sp500)
+vix_5d = VIX * exp(gauss_rets_vix)
+
+# Solving for parameters alpha1, alpha2, alpha3 and alpha4
+params_vec = rep(0, 4)
+obj_min = 1e6
+n_repeat = 100
+
+for (i in 1:n_repeat) {
+  ini_params = runif(4, min = -5, max = 5)
+  fit_params = optim(par = ini_params, f_obj_fn,
+                     options_data = options_all)
+  if (fit_params$value < obj_min) {
+    obj_min = fit_params$value
+    params_vec = fit_params$par
+  }
+}
+
+
+#repricing the portfolio
+
+#  Shift parameter
+delta_shift = params_vec[1] + params_vec[4] - VIX
+
+
+#  Volatility in 5 days
+vix_shift = vix_5d + delta_shift
+
+
+BV_new = rep(NA, n_sim) # new book value
+for (i in 1:n_sim) {
+  S_vec = rep(sp500_5d[i], 4)
+  vol_vec = rep(vix_shift[i], 4)
+  price_vec = f_vBS_price(S_vec,
+                         K_vec,
+                         TT_vec_5d,
+                         vol_vec,
+                         r_vec_5d,
+                         isCall_vec)
+  BV_new[i] = sum(price_vec)
+}
+PL_gauss_volsurf = exp(-5/360 * r5) * BV_new - V0
+VaR95_gauss_volsurf = quantile(PL_gauss_volsurf, 0.05)
+ES95_gauss_volsurf = mean(PL_gauss_volsurf[PL_gauss_volsurf <= VaR95_gauss_volsurf])
+
+f_hist(
+  data = PL_gauss_volsurf,
+  threshold = VaR95_gauss_volsurf,
+  xlab = "PL_gauss_volsurf"
+)
+
+my_caption = paste("P&L distribution when log-returns of the SP500 and the 
+                   VIX are assumed to follow a bivariate normal distribution. 
+                   The simulated values of the VIX are shifted by the one year
+                   ATM volatility difference. The red line at ", 
+                   round(VaR95_gauss_volsurf, 2), 
+                   " represents the value at risk at 95% probability.")
+
+```
+
+We model `r n_sim` possible values for the SP500 and the VIX in 5 days and 
+use them to estimate the distribution for the P&L in a week (5 days).
+The simulated values of the VIX are then shifted by the difference between the
+one year ATM value of the implied volatility and today value of the VIX.
+The distribution of the P\&L is given in Figure \@ref(fig:volsurf) .
+
+
+The VaR at risk at the 95% confidence level is
+VaR95 = `r round(VaR95_gauss_volsurf, 2)`
+and the expected shortfall is ES95 = `r round(ES95_gauss_volsurf, 2)`.
+So we expect the book of options to lose at least 
+`r round(abs(VaR95_gauss_volsurf), 2)` from its initial value 5% of the time.
+
+# Full approach
+
+```{r full, fig.cap = my_caption}
+
+set.seed(2019)
+n_sim = 10000L
+lib_vec = c("PerformanceAnalytics", "copula", "MASS", "fGarch", "rugarch")
+invisible(lapply(lib_vec, f_install_load_lib))
+
+# log returns
+mu_sp500 =  mean(sp500_logrets)
+mu_vix = mean(vix_logrets)
+
+## Fit GARCH(1,1) to log returns of SP500
+fit_GARCH_sp500.spec = ugarchspec(
+  variance.model = list(model = "sGARCH",
+                        garchOrder = c(1, 1)),
+  mean.model = list(armaOrder = c(0, 0),
+                    include.mean = FALSE),
+  distribution.model = "norm"
+)
+fit_GARCH_sp500   =  ugarchfit(data = sp500_logrets,
+                               spec = fit_GARCH_sp500.spec)
+
+# MLE
+mu_res_sp500 = mean(as.numeric(fit_GARCH_sp500@fit$z))
+sd_res_sp500 = sd(as.numeric(fit_GARCH_sp500@fit$z)) *
+  sqrt((length(sp500_logrets) - 1) / length(sp500_logrets))
+
+
+# Fit AR(1) to log returns of Vix
+fit_vix = arima(x = vix_logrets, order = c(1, 0, 0))
+mu_res_vix = mean(fit_vix$residuals)
+sd_res_vix =  sqrt((length(sp500_logrets) - 1) / length(sp500_logrets)) *
+  sd(fit_vix$residuals)
+
+# Distribution of the marginals
+U1 = pnorm(fit_GARCH_sp500@fit$z, mean = mu_res_sp500, sd = sd_res_sp500)
+U2 = pnorm(fit_vix$residuals , mean = mu_res_vix, sd = sd_res_vix)
+U = cbind(U1, U2)
+
+# Fit normal copula
+C = normalCopula(dim = 2)
+fit = fitCopula(C, data = U, method = "ml")
+
+# Generate draws for the invariants
+U_sim = rCopula(5 * n_sim, fit@copula)
+res_sp500 = matrix(
+  qnorm(U_sim[, 1],  mean = mu_res_sp500, sd = sd_res_sp500),
+  nrow = n_sim,
+  ncol = 5
+)
+res_vix = matrix(qnorm(U_sim[, 2],  mean = mu_res_vix, sd = sd_res_vix),
+                 nrow = n_sim,
+                 ncol = 5)
+
+# Initializing the GARCH(1,1) process
+logrets_sp500 = matrix(NA, nrow = n_sim, ncol = 6)
+logrets_sp500[, 1] = rep(tail(sp500_logrets, 1), n_sim)
+sigma2_sp500 = rep(tail(fit_GARCH_sp500@fit$sigma, 1) ^ 2, n_sim)
+
+# Initializing the AR(1) process
+logrets_vix = matrix(NA, nrow = n_sim, ncol = 6)
+logrets_vix[, 1] = rep(tail(vix_logrets, 1), n_sim)
+
+
+for (i in 1:5) {
+  logrets_vix[, i + 1] = as.numeric(fit_vix$coef["intercept"]) +
+    as.numeric(fit_vix$coef["ar1"]) * logrets_vix[, i]  +
+    res_vix[, i]
+  
+  sigma2_sp500 = as.numeric(fit_GARCH_sp500@fit$coef["omega"]) +
+    as.numeric(fit_GARCH_sp500@fit$coef["alpha1"]) * logrets_sp500[, i] ^
+    2 +
+    as.numeric(fit_GARCH_sp500@fit$coef["beta1"]) * sigma2_sp500
+  
+  logrets_sp500[, i + 1] = res_sp500[, i] *
+    sigma2_sp500 ^ 0.5
+}
+
+sp500_new = S0 * exp(rowSums(logrets_sp500[, 2:ncol(logrets_sp500)]))
+vix_5d = VIX * exp(rowSums(logrets_vix[, 2:ncol(logrets_vix)]))
+
+
+# profit and loss distribution for 1 risk driver (1D)
+BV_new = rep(NA, n_sim) # new book value
+
+for (i in 1:n_sim) {
+  S_vec = rep(sp500_new[i], 4)
+  vol_vec = rep(vix_5d[i], 4)
+  price_vec = f_vBS_price(S_vec,
+                          K_vec,
+                          TT_vec_5d,
+                          vol_vec,
+                          r_vec_5d,
+                          isCall_vec)
+  BV_new[i] = sum(price_vec)
+}
+PL_full = exp(-5/360 * r5) * BV_new - V0
+VaR95_full = quantile(PL_full, 0.05)
+ES95_full = mean(PL_full[PL_full <= VaR95_full])
+
+f_hist(
+  data = PL_full,
+  threshold = VaR95_full,
+  xlab = "PL_full_approach"
+)
+
+my_caption = paste("P&L distribution when log-returns of the SP500 follow 
+                   an ARMA(1,1) and the log-returns of the VIX an AR(1). 
+                   The invariants of the two processes are linked by a 
+                   Gaussian copula.  The red line at ", 
+                   round(VaR95_full, 2), 
+                   " represents the value at risk at 95% probability.")
+
+```
+
+Here, we fit a GARCH(1,1) to the log-returns of the SP500 and an AR(1) process 
+to the log-returns of the VIX. The residuals of the two processes are 
+assumed to be invariants and to be linked by a Gaussian copula.
+We generate `r n_sim` possible values for the SP500 and the VIX in 5 days and 
+use them to estimate the distribution for the P&L in a week (5 days).
+The distribution of the P\&L is given in Figure \@ref(fig:full) .
+
+
+The VaR at risk at the 95% confidence level is
+VaR95 = `r round(VaR95_full, 2)`
+and the expected shortfall is ES95 = `r round(ES95_full, 2)`.
+So we expect the book of options to lose at least 
+`r round(abs(VaR95_full), 2)` from its initial value 5% of the time.
