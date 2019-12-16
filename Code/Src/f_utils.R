@@ -1,7 +1,6 @@
 
 
 
-
 f_BS_price = function(S, K,  TT, vol, r, isCall) {
   # Function to price options using Black Scholes formula
   
@@ -83,11 +82,12 @@ f_hist = function(data, threshold, xlab, title = NULL) {
   #output:
   #  Plotted graph
   
-  hist(data,
-       breaks = 10 * round(log(length(data))) ,
-       xlab = xlab,
-       main = title,
-       )
+  hist(
+    data,
+    breaks = 10 * round(log(length(data))) ,
+    xlab = xlab,
+    main = title,
+  )
   abline(v = threshold, col = "red", lwd = 2)
   
 }

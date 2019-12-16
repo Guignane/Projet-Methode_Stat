@@ -14,7 +14,7 @@ output:
 knitr::opts_chunk$set(echo = FALSE)
 knitr::opts_chunk$set(message = FALSE)
 knitr::opts_chunk$set(fig.align = "center")
-opts_knit$set(eval.after = "fig.cap")
+knitr::opts_knit$set(eval.after = "fig.cap")
 
 ```
 ```{r}
@@ -93,7 +93,7 @@ p = plot_ly(x = x.si, y = y.si, z = z.si, type = "surface") %>%
 layout( scene = list( xaxis = list(title = "Maturities"),
                       yaxis = list(title = "Strikes"),
                       zaxis = list(title = "IV"),
-                      camera = list(eye = list(x = 1.5, y = 1.5, z = 1.5) )
+                      camera = list(eye = list(x = 1.5, y = 1.5, z = 1.5))
                       )
         )
 
@@ -256,8 +256,9 @@ So we expect the book of options to lose at least
 In this section, we assume that the risk of our book of options is driven by 
 two factors namely the change in price of the SP500 index and the volatility 
 of the market (given by the VIX).
-The log-returns of the SP500 and the VIX are assumed to follow a normal distribution with parameters given by the mean and standard deviation from the historical 
-values.
+The log-returns of the SP500 and the VIX are assumed to follow a normal 
+distribution with parameters given by the mean and standard deviation from 
+the historical values.
 
 ```{r gauss2D, fig.cap = my_caption}
 
@@ -329,9 +330,9 @@ So we expect the book of options to lose at least
 In this section, we assume that the risk of our book of options is driven by 
 two factors namely the change in price of the SP500 index and the volatility 
 of the market (given by the VIX).
-The log-returns of the SP500 are assumed to follow a Student-t distribution with 
-$\nu = 10$ degrees of freedom and the log-returns of the VIX are assumed to
-follow  a Student-t distribution with  $\nu = 5$ degrees of freedom.
+The log-returns of the SP500 are assumed to follow a Student-t distribution 
+with $\nu = 10$ degrees of freedom and the log-returns of the VIX are assumed 
+to follow  a Student-t distribution with  $\nu = 5$ degrees of freedom.
 A normal Copula is assumed to merge the marginals.
 
 ```{r ststgauss2D, fig.cap = my_caption }
@@ -532,7 +533,8 @@ for (i in 1:n_sim) {
 }
 PL_gauss_volsurf = exp(-5/360 * r5) * BV_new - V0
 VaR95_gauss_volsurf = quantile(PL_gauss_volsurf, 0.05)
-ES95_gauss_volsurf = mean(PL_gauss_volsurf[PL_gauss_volsurf <= VaR95_gauss_volsurf])
+ES95_gauss_volsurf = mean(PL_gauss_volsurf[PL_gauss_volsurf 
+                                           <= VaR95_gauss_volsurf])
 
 f_hist(
   data = PL_gauss_volsurf,

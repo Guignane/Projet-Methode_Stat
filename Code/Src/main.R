@@ -1,5 +1,6 @@
 
-# Main file for tp2 
+
+# Main file for tp2
 
 f_install_load_lib = function(x) {
   # Function to load library x. It checks if library x is present in R.
@@ -8,7 +9,8 @@ f_install_load_lib = function(x) {
   # input:
   # string x: vector of strings containing the library to be loaded
   
-  if (!require(x, character.only = TRUE)) { # Check if library x is installed
+  if (!require(x, character.only = TRUE)) {
+    # Check if library x is installed
     
     install.packages(x)
   }
@@ -16,9 +18,11 @@ f_install_load_lib = function(x) {
   require(x, character.only = TRUE)
 }
 
-lib_vec = c("here", "rmarkdown", "bookdown") 
-invisible( lapply(lib_vec, f_install_load_lib) ) 
+lib_vec = c("here", "rmarkdown", "bookdown")
+invisible(lapply(lib_vec, f_install_load_lib))
 
-render(input = here("Code", "Analysis", "risk_analysis.Rmd") ,
-       output_format = "html_document2",
-       output_dir = here("Output", "Output") )
+render(
+  input = here("Code", "Analysis", "risk_analysis.Rmd") ,
+  output_format = "html_document2",
+  output_dir = here("Output", "Output")
+)
