@@ -212,7 +212,7 @@ gauss_rets_sp500 = rowSums(matrix(
 ))
 sp500_5d = S0 * exp(gauss_rets_sp500)
 
-# profit and loss distribution for 1 risk driver (1D)
+# profit and loss distribution 
 BV_5d = rep(NA, n_sim) # new book value
 
 for (i in 1:n_sim) {
@@ -266,7 +266,7 @@ set.seed(2019)
 lib_vec = c("mnormt")
 invisible(lapply(lib_vec, f_install_load_lib))
 
-# Gaussian model (MLE)
+# Bivariate Gaussian model (MLE)
 rets = cbind(sp500_logrets, vix_logrets)
 n <- nrow(rets)
 mu_gauss_biv <- colMeans(rets)
@@ -284,7 +284,7 @@ gauss_rets_vix =  rowSums(matrix(tmp_biv[, 2], nrow = n_sim, ncol = 5))
 sp500_5d = S0 * exp(gauss_rets_sp500)
 vix_5d = VIX * exp(gauss_rets_vix)
 
-# profit and loss distribution for 1 risk driver (1D)
+# profit and loss distribution 
 BV_5d = rep(NA, n_sim) # new book value
 
 r_vec = c(fwd_5_20, fwd_5_20, fwd_5_40, fwd_5_40)
@@ -399,7 +399,7 @@ logrets_vix  = rowSums(matrix(
 sp500_5d = S0 * exp(logrets_sp500)
 vix_5d = VIX * exp(logrets_vix)
 
-# profit and loss distribution for 1 risk driver (1D)
+# profit and loss distribution 
 BV_5d = rep(NA, n_sim) # new book value
 
 for (i in 1:n_sim) {
@@ -449,34 +449,13 @@ set.seed(2019)
 lib_vec = c("mnormt")
 invisible(lapply(lib_vec, f_install_load_lib))
 
-f_parametric_IV = function(params, m, tau) {
-  alpha1 = params[1]
-  alpha2 = params[2]
-  alpha3 = params[3]
-  alpha4 = params[4]
-  
-  stopifnot(length(m) == length(tau)) #Check moneyness and tau have same length
-  sigma = alpha1 + alpha2 * (m - 1) ** 2 + alpha3 * (m - 1) ** 3 +
-    alpha4 * sqrt(tau)
-  return(sigma)
-}
-
-f_obj_fn = function(params, options_data) {
-  m_vec = options_data[, 1]
-  tau_vec = options_data[, 3]
-  IV_vec = options_data[, 4]
-  sigma_model = f_parametric_IV(params, m_vec, tau_vec)
-  return(sum(abs(sigma_model - IV_vec)))
-}
-
-
 calls_info = Market$calls
 puts_info = Market$puts
 options_all = rbind(calls_info, puts_info)
 moneyness = options_all[, 1] / S0
 options_all = cbind(moneyness, options_all)
 
-# Gaussian model (MLE)
+# Bivariate Gaussian model (MLE)
 rets = cbind(sp500_logrets, vix_logrets)
 n <- nrow(rets)
 mu_gauss_biv <- colMeans(rets)
@@ -518,7 +497,7 @@ delta_shift = params_vec[1] + params_vec[4] - VIX
 #  Volatility in 5 days
 vix_shift = vix_5d + delta_shift
 
-
+# profit and loss distribution 
 BV_new = rep(NA, n_sim) # new book value
 for (i in 1:n_sim) {
   S_vec = rep(sp500_5d[i], 4)
@@ -648,7 +627,7 @@ sp500_new = S0 * exp(rowSums(logrets_sp500[, 2:ncol(logrets_sp500)]))
 vix_5d = VIX * exp(rowSums(logrets_vix[, 2:ncol(logrets_vix)]))
 
 
-# profit and loss distribution for 1 risk driver (1D)
+# profit and loss distribution 
 BV_new = rep(NA, n_sim) # new book value
 
 for (i in 1:n_sim) {

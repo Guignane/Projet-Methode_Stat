@@ -1,6 +1,5 @@
 
 
-
 f_BS_price = function(S, K,  TT, vol, r, isCall) {
   # Function to price options using Black Scholes formula
   
@@ -90,4 +89,26 @@ f_hist = function(data, threshold, xlab, title = NULL) {
   )
   abline(v = threshold, col = "red", lwd = 2)
   
+}
+
+
+f_parametric_IV = function(params, m, tau) {
+  alpha1 = params[1]
+  alpha2 = params[2]
+  alpha3 = params[3]
+  alpha4 = params[4]
+  
+  stopifnot(length(m) == length(tau)) #Check moneyness and tau have same length
+  sigma = alpha1 + alpha2 * (m - 1) ** 2 + alpha3 * (m - 1) ** 3 +
+    alpha4 * sqrt(tau)
+  return(sigma)
+}
+
+
+f_obj_fn = function(params, options_data) {
+  m_vec = options_data[, 1]
+  tau_vec = options_data[, 3]
+  IV_vec = options_data[, 4]
+  sigma_model = f_parametric_IV(params, m_vec, tau_vec)
+  return(sum(abs(sigma_model - IV_vec)))
 }
