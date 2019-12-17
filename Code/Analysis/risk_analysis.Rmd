@@ -1,10 +1,14 @@
 ---
-title: "Travaux Pratiques 2: Risk Management"
+title: "Travail Pratique 2: Risk Management"
+author: 
+ - "By : " 
+ - "Rabii Meftahi"
+ - "Serge Nzoke Baman"
+ - "Marie Guignane Tine" 
+ 
 output:
-  bookdown::html_document2:
-  html_document:
- #  df_print: paged
- # pdf_document: default
+  bookdown::html_document2
+
 ---
 
 
@@ -30,17 +34,17 @@ load(here("Data", "Original", "Market.rda"))
 
 
 # Loading the data
-The file **Market.rda** contains the list **Market**.
+The file **Market.rda** contains the list "**Market**".
 
-The first element of the list **Market** is an xts object corresponding to the 
-value of the SP500 index from "2000-01-03" until "2013-09-10".
+The first element of the list is an xts object corresponding to the 
+value of the SP500 index from "2000-01-03" to "2013-09-10".
 
-The second element vix corresponds to the value of the VIX  index at the same 
+The second element (vix) corresponds to the value of the VIX  index at the same 
 dates.
 
-The third element rf corresponds to the term structure on "2013-09-10" for 14
+The third element (rf) corresponds to the term structure on "2013-09-10" for 14
 maturities varying from 1 day to 30 years.
-The term structure for the interest rates can be seen in 
+The term structure for the annualized interest rates can be seen in 
 Figure \@ref(fig:ratestructure) .
 ```{r ratestructure, fig.cap = my_caption }
 my_caption = " Interest rates term structure."
@@ -51,11 +55,11 @@ plot(x = x_plot , y = y_plot , type = "l", lwd = 2, col = "blue",
 points(x = x_plot, y = y_plot, col = "blue", pch = 16)
 ```
 
-The fourth (calls) and the fifth (puts) contains the strikes (K), 
-maturities (tau) and implied volatilities (IV) for calls and puts options 
+The fourth (calls) and the fifth (puts) elements of the list contain the strikes 
+(K), maturities (tau) and implied volatilities (IV) for calls and puts options 
 respectively.
 
-We plot the volatility surface in Figure \@ref(fig:surfvolputs) .
+We plot the interpolated volatility surface in Figure \@ref(fig:surfvolputs) .
 
 
 ```{r surfvolputs, fig.cap = my_caption }
@@ -106,7 +110,7 @@ p
 
 ```{r}
 
-# Initializing recurrent variables
+# Initializing global variables
 
 S0 = as.numeric(tail(Market$sp500, n = 1)) # Current index value
 VIX = as.numeric(tail(Market$vix, n = 1)) # Current vix value
@@ -158,6 +162,7 @@ sigma2_vix = (length(vix_logrets) - 1) / (length(vix_logrets)) *
   var(vix_logrets)
 
 ```
+
 # Pricing of a portfolio of options
 
 ```{r}
@@ -190,15 +195,30 @@ knitr::kable(options_df, caption = "Prices of the (call) options in our book",
 
 ```
 
-The price of this book (the sum of prices of the calls that constitutes 
+The price of this book (the sum the call prices that constitute 
 the book) is $V_0$ = `r round(V0, 2)`.
+
+
+# Procedure for the P\&L computation
+We start by simulating the 5 days ahead log-returns of the SP500 and the VIX 
+(if necessary). By aggregating them we get the 5 days compounded log-returns 
+that will be used to simulate the corresponding underlying values of the SP500 
+and the VIX.
+
+We then use our Black & Scholes option pricing function to compute the call 
+prices and ultimately evaluate the book-values of our `r n_sim` simulated 
+scenarios.
+
+The P\&L is equal to the difference between the discounted 5 days ahead 
+book-values $BV_{5d}$ and our initial book-value namely $V_0$.
 
 # One risk driver and Gaussian model
 
 In this section, we assume that the risk of our book of options is driven by 
 a single factor namely the change in price of the SP500 index.
 The log-returns of the index are assumed to follow a normal distribution with 
-parameters given by the mean and standard deviation from the historical values.
+parameters given by the mean and the standard deviation from the historical 
+values.
 
 ```{r gauss1D, fig.cap = my_caption}
 
@@ -241,8 +261,8 @@ my_caption = paste("P&L distribution for normal log-returns of the SP500.",
 
 ```
 
-We model `r n_sim` possible values for the stocks in 5 days and 
-use them to estimate the distribution for the P&L in a week (5 days).
+We simulate `r n_sim` values for the stocks in 5 days and 
+use them to estimate the distribution for the P\&L.
 The distribution of the P\&L is given in Figure \@ref(fig:gauss1D) .
 
 The VaR at risk at the 95% confidence level is
@@ -256,9 +276,9 @@ So we expect the book of options to lose at least
 In this section, we assume that the risk of our book of options is driven by 
 two factors namely the change in price of the SP500 index and the volatility 
 of the market (given by the VIX).
-The log-returns of the SP500 and the VIX are assumed to follow a normal 
-distribution with parameters given by the mean and standard deviation from 
-the historical values.
+The log-returns of the SP500 and the log-returns of the VIX are assumed to 
+follow a bivariate normal distribution with parameters given by the mean and the 
+variance-covariance matrix computed from the historical values.
 
 ```{r gauss2D, fig.cap = my_caption}
 
@@ -315,8 +335,8 @@ my_caption = paste("P&L distribution when log-returns of SP500 and VIX are
                    "represents the value at risk at 95% probability.")
 
 ```
-We model `r n_sim` possible values for the SP500 and the VIX in 5 days and 
-use them to estimate the distribution for the P&L in a week (5 days).
+We simulate `r n_sim` values for the SP500 and the VIX in 5 days and 
+use them to estimate the distribution for the P\&L.
 The distribution of the P\&L is given in Figure \@ref(fig:gauss2D) .
 
 The VaR at risk at the 95% confidence level is
@@ -333,7 +353,7 @@ of the market (given by the VIX).
 The log-returns of the SP500 are assumed to follow a Student-t distribution 
 with $\nu = 10$ degrees of freedom and the log-returns of the VIX are assumed 
 to follow  a Student-t distribution with  $\nu = 5$ degrees of freedom.
-A normal Copula is assumed to merge the marginals.
+A normal Copula is assumed to link the marginals.
 
 ```{r ststgauss2D, fig.cap = my_caption }
 
@@ -430,8 +450,8 @@ my_caption = paste("P&L distribution when log-returns of the SP500 and
                    The red line at ", round(VaR95_ststgauss2D, 2), 
                    " represents the value at risk at 95% probability.")
 ```
-We model `r n_sim` possible values for the SP500 and the VIX in 5 days and 
-use them to estimate the distribution for the P&L in a week (5 days).
+We simulate `r n_sim` values for the SP500 and the VIX in 5 days and 
+use them to estimate the distribution for the P\&L.
 The distribution of the P\&L is given in Figure \@ref(fig:ststgauss2D) .
 
 The VaR at risk at the 95% confidence level is
@@ -530,10 +550,15 @@ my_caption = paste("P&L distribution when log-returns of the SP500 and the
 
 ```
 
-We model `r n_sim` possible values for the SP500 and the VIX in 5 days and 
-use them to estimate the distribution for the P&L in a week (5 days).
+We simulate `r n_sim` values for the SP500 and the VIX in 5 days and 
+use them to estimate the distribution for the P\&L.
 The simulated values of the VIX are then shifted by the difference between the
 one year ATM value of the implied volatility and today value of the VIX.
+
+The implied volatility model is :
+$\sigma(m, \tau) = \alpha_1 + \alpha_2(m - 1)^2 + \alpha_3(m - 1)^3 + 
+\alpha_4\sqrt{\tau}$
+
 The distribution of the P\&L is given in Figure \@ref(fig:volsurf) .
 
 
@@ -652,7 +677,7 @@ f_hist(
 )
 
 my_caption = paste("P&L distribution when log-returns of the SP500 follow 
-                   an ARMA(1,1) and the log-returns of the VIX an AR(1). 
+                   a GARCH(1,1) and the log-returns of the VIX an AR(1). 
                    The invariants of the two processes are linked by a 
                    Gaussian copula.  The red line at ", 
                    round(VaR95_full, 2), 
@@ -662,9 +687,9 @@ my_caption = paste("P&L distribution when log-returns of the SP500 follow
 
 Here, we fit a GARCH(1,1) to the log-returns of the SP500 and an AR(1) process 
 to the log-returns of the VIX. The residuals of the two processes are 
-assumed to be invariants and to be linked by a Gaussian copula.
-We generate `r n_sim` possible values for the SP500 and the VIX in 5 days and 
-use them to estimate the distribution for the P&L in a week (5 days).
+used as invariants and are linked by a Gaussian copula.
+We generate `r n_sim` values for the SP500 and the VIX in 5 days and 
+use them to estimate the distribution for the P\&L.
 The distribution of the P\&L is given in Figure \@ref(fig:full) .
 
 

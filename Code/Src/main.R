@@ -12,7 +12,7 @@ f_install_load_lib = function(x) {
   if (!require(x, character.only = TRUE)) {
     # Check if library x is installed
     
-    install.packages(x)
+    install.packages(x, repos = "http://cran.us.r-project.org")
   }
   # load required package
   require(x, character.only = TRUE)
